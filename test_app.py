@@ -96,6 +96,46 @@ def test_parse_quiz_json_raises_for_invalid_schema() -> None:
         app.parse_quiz_json(raw)
 
 
+def test_build_quiz_prompt_includes_difficulty_and_style() -> None:
+    prompt = app.build_quiz_prompt(
+        "Binary trees and traversals",
+        difficulty="Hard",
+        style="Exam-style",
+    )
+
+    assert "Difficulty level: Hard" in prompt
+    assert "Question style: Exam-style" in prompt
+    assert "Binary trees and traversals" in prompt
+
+
+def test_extract_json_array_handles_extra_text() -> None:
+    raw = "Some preface text\n[{\"k\":1}]\nSome trailing text"
+    extracted = app.extract_json_array(raw)
+    assert extracted == "[{\"k\":1}]"
+
+
+def test_parse_quiz_json_raises_when_answer_not_in_options() -> None:
+    raw = """
+[
+  {"question": "Q1", "options": ["A", "B", "C", "D"], "answer": "Z", "explanation": "E1"},
+  {"question": "Q2", "options": ["A", "B", "C", "D"], "answer": "B", "explanation": "E2"},
+  {"question": "Q3", "options": ["A", "B", "C", "D"], "answer": "C", "explanation": "E3"}
+]
+"""
+    with pytest.raises(ValueError, match="answer must match one of its options"):
+        app.parse_quiz_json(raw)
+
+
+def test_score_answers_all_wrong() -> None:
+    questions = sample_questions()
+    selected = ["A loop type", "func", "Joined System Object Naming"]
+    result = app.score_answers(questions, selected)
+
+    assert result["score"] == 0
+    assert result["total"] == 3
+    assert all(not item["is_correct"] for item in result["results"])
+
+
 def test_generate_quiz_questions_with_mocked_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_response_text = """
 [
@@ -108,12 +148,15 @@ def test_generate_quiz_questions_with_mocked_gemini(monkeypatch: pytest.MonkeyPa
     class FakeResponse:
         text = fake_response_text
 
+    captured: dict[str, str] = {}
+
     class FakeModel:
         def __init__(self, _model_name: str):
             pass
 
         def generate_content(self, _prompt: str, generation_config: dict, request_options: dict):
             # Basic checks to ensure expected call pattern.
+            captured["prompt"] = _prompt
             assert "temperature" in generation_config
             assert "timeout" in request_options
             return FakeResponse()
@@ -121,7 +164,14 @@ def test_generate_quiz_questions_with_mocked_gemini(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(app.genai, "configure", lambda api_key: None)
     monkeypatch.setattr(app.genai, "GenerativeModel", FakeModel)
 
-    questions = app.generate_quiz_questions("Some notes", "fake-api-key")
+    questions = app.generate_quiz_questions(
+        "Some notes",
+        "fake-api-key",
+        difficulty="Easy",
+        style="Application",
+    )
 
     assert len(questions) == 3
     assert questions[2]["answer"] == "C"
+    assert "Difficulty level: Easy" in captured["prompt"]
+    assert "Question style: Application" in captured["prompt"]
