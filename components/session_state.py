@@ -6,7 +6,6 @@ import streamlit as st
 
 
 def initialize_session_state() -> None:
-    """Initialize session keys once to prevent key errors."""
     defaults = {
         "username": None,
         "user_id": None,
@@ -22,7 +21,6 @@ def initialize_session_state() -> None:
 
 
 def clear_quiz_widget_state(question_count: int = 10) -> None:
-    """Clear quiz radio widget state keys."""
     for idx in range(1, question_count + 1):
         key = f"q_{idx}"
         if key in st.session_state:
@@ -30,7 +28,6 @@ def clear_quiz_widget_state(question_count: int = 10) -> None:
 
 
 def reset_user_state() -> None:
-    """Reset active-user and quiz state when switching user."""
     st.session_state["username"] = None
     st.session_state["user_id"] = None
     st.session_state["questions"] = None

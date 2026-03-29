@@ -1,5 +1,3 @@
-"""Dashboard page rendering."""
-
 from __future__ import annotations
 
 import pandas as pd
@@ -10,7 +8,6 @@ from database import fetch_quiz_history, fetch_score_history, fetch_user_metrics
 
 
 def render_dashboard_page(user_id: int, motivational_quotes: list[str]) -> None:
-    """Display user performance metrics and analytics."""
     render_page_header("Dashboard", "Track your learning performance with visual analytics.")
 
     metrics = fetch_user_metrics(user_id)

@@ -163,3 +163,58 @@ def score_answers(
         "total": len(questions),
         "results": results,
     }
+
+
+def build_study_plan_prompt(
+    weak_topics: list[str],
+    goal: str,
+    hours_per_week: int,
+) -> str:
+    """Build prompt for personalized study coaching plan."""
+    topics = "\n".join(f"- {topic}" for topic in weak_topics) if weak_topics else "- No specific weak topics"
+    return f"""
+You are an academic study coach for a BSc Computer Science student.
+
+Create a practical 2-week study plan in markdown format.
+
+Constraints:
+- Weekly availability: {hours_per_week} hours
+- Student goal: {goal or 'Improve core understanding and quiz performance'}
+- Prioritize these weak topics:
+{topics}
+
+Output format:
+1. Short diagnostic summary
+2. 2-week schedule (day-by-day tasks)
+3. Active-recall quiz routine
+4. Revision checklist
+5. Success criteria with measurable targets
+
+Tone: concise, encouraging, and actionable.
+""".strip()
+
+
+def generate_study_plan(
+    weak_topics: list[str],
+    goal: str,
+    hours_per_week: int,
+    api_key: str,
+    model_name: str = MODEL_NAME,
+) -> str:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+
+    response = model.generate_content(
+        build_study_plan_prompt(
+            weak_topics=weak_topics,
+            goal=goal,
+            hours_per_week=hours_per_week,
+        ),
+        generation_config={"temperature": 0.4},
+        request_options={"timeout": 40},
+    )
+
+    if not getattr(response, "text", None):
+        raise ValueError("AI returned an empty study plan response.")
+
+    return response.text.strip()

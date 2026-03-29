@@ -1,5 +1,3 @@
-"""Quiz history page rendering."""
-
 from __future__ import annotations
 
 import streamlit as st
@@ -10,7 +8,6 @@ from database import fetch_quiz_by_id, fetch_quiz_history
 
 
 def render_quiz_history_page(user_id: int) -> None:
-    """Display previous quizzes and allow retake without API call."""
     render_page_header("Quiz History", "Review attempts and retake quizzes instantly.")
 
     history = fetch_quiz_history(user_id)

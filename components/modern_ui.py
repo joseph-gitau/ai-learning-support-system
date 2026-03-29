@@ -1,5 +1,3 @@
-"""Modern UI components using streamlit-elements + Material UI."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,16 +5,12 @@ from pathlib import Path
 import streamlit as st
 from streamlit_elements import elements, mui
 
-
 def apply_styles(css_path: str) -> None:
-    """Load custom CSS stylesheet into Streamlit."""
     css_file = Path(css_path)
     if css_file.exists():
         st.markdown(f"<style>{css_file.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-
 def render_top_hero(title: str, subtitle: str) -> None:
-    """Render gradient hero section."""
     st.markdown(
         f"""
         <div class="top-hero">
@@ -27,9 +21,7 @@ def render_top_hero(title: str, subtitle: str) -> None:
         unsafe_allow_html=True,
     )
 
-
 def render_top_header_bar(username: str | None, api_ready: bool) -> None:
-    """Render a modern top header bar with Material UI icons and chips."""
     with elements("top_header_bar"):
         with mui.Paper(
             elevation=0,
@@ -59,9 +51,7 @@ def render_top_header_bar(username: str | None, api_ready: bool) -> None:
                         variant="filled",
                     )
 
-
 def render_metric_cards(total_quizzes: int, avg_score: float, total_questions: int) -> None:
-    """Render KPI cards using Material UI grid and icons."""
     with elements("kpi_cards"):
         with mui.Grid(container=True, spacing=2):
             for icon_name, title, value in [
@@ -86,9 +76,7 @@ def render_metric_cards(total_quizzes: int, avg_score: float, total_questions: i
                                 mui.Typography(title, variant="body2", sx={"color": "#697094"})
                                 mui.Typography(value, variant="h5", sx={"fontWeight": 700})
 
-
 def render_badges(badges: list[str]) -> None:
-    """Render badge chips with Material UI."""
     with elements("badge_row"):
         with mui.Stack(direction="row", spacing=1, flexWrap="wrap", useFlexGap=True):
             if not badges:
@@ -97,8 +85,15 @@ def render_badges(badges: list[str]) -> None:
             for badge in badges:
                 mui.Chip(label=badge, color="secondary", variant="outlined")
 
-
 def render_page_header(title: str, subtitle: str) -> None:
-    """Render consistent section heading for each page."""
     st.markdown(f"### {title}")
     st.caption(subtitle)
+
+def render_top_nav(pages: list[str], current_page: str) -> str:
+    selected_page = current_page
+    columns = st.columns(len(pages))
+    for idx, page in enumerate(pages):
+        button_type = "primary" if page == current_page else "secondary"
+        if columns[idx].button(page, key=f"top_nav_{page}", use_container_width=True, type=button_type):
+            selected_page = page
+    return selected_page

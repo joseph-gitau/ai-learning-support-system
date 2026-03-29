@@ -1,6 +1,4 @@
-"""Pytest suite for core app logic.
-
-These tests avoid live API calls by mocking the Gemini client.
+"""Pytest suite
 """
 
 from __future__ import annotations

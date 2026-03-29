@@ -1,17 +1,14 @@
-"""Quiz generation and interaction page rendering."""
-
 from __future__ import annotations
 
 import streamlit as st
 
 from components.modern_ui import render_page_header
 from components.session_state import clear_quiz_widget_state
-from database import save_quiz_attempt
+from database import fetch_user_metrics, save_quiz_attempt
 from services.quiz_engine import generate_quiz_questions, score_answers
 
 
 def _render_quiz_form() -> None:
-    """Render active quiz form and persist result after submission."""
     questions = st.session_state.get("questions")
     if not questions:
         st.info("No active quiz yet. Generate one first or retake from history.")
@@ -52,7 +49,6 @@ def _render_quiz_form() -> None:
 
 
 def _render_quiz_feedback() -> None:
-    """Show score summary and per-question explanations."""
     quiz_result = st.session_state.get("quiz_result")
     if not quiz_result:
         return
@@ -95,10 +91,21 @@ def _render_quiz_feedback() -> None:
 
 
 def render_generate_quiz_page(api_key: str, model_name: str) -> None:
-    """Render quiz generation page and active quiz interaction."""
     render_page_header("Generate Quiz", "Turn your notes into an interactive AI practice session.")
 
     left, right = st.columns([2, 1])
+
+    metrics = fetch_user_metrics(st.session_state["user_id"])
+    avg_score = float(metrics["average_score_percent"])
+    if avg_score >= 80:
+        recommended_difficulty = "Hard"
+    elif avg_score >= 50:
+        recommended_difficulty = "Mixed"
+    else:
+        recommended_difficulty = "Easy"
+
+    st.info(f"Adaptive recommendation: **{recommended_difficulty}** difficulty based on your average score {avg_score:.1f}%.")
+
     with left:
         notes = st.text_area(
             "Study notes",
@@ -113,7 +120,7 @@ def render_generate_quiz_page(api_key: str, model_name: str) -> None:
             difficulty = st.selectbox(
                 "Difficulty",
                 options=["Easy", "Mixed", "Hard"],
-                index=1,
+                index=["Easy", "Mixed", "Hard"].index(recommended_difficulty),
             )
             style = st.selectbox(
                 "Question style",

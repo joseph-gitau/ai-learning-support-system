@@ -1,13 +1,3 @@
-"""AI-Based Student Learning Support System (Phase 2).
-
-This Streamlit app includes:
-- Sidebar multi-page navigation (Dashboard, Generate Quiz, Quiz History)
-- Lightweight user login (username-based)
-- SQLite persistence for quizzes/results
-- User-level performance dashboard and score trend
-- Quiz history with retake support (no API re-call needed)
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,12 +21,14 @@ from database import (
 from pages.dashboard_page import render_dashboard_page
 from pages.history_page import render_quiz_history_page
 from pages.quiz_page import render_generate_quiz_page
+from pages.study_coach_page import render_study_coach_page
 from components.modern_ui import (
     apply_styles,
     render_badges,
     render_metric_cards,
     render_page_header,
     render_top_header_bar,
+    render_top_nav,
     render_top_hero,
 )
 
@@ -455,7 +447,6 @@ def render_quiz_feedback() -> None:
         st.warning("Keep going. Start with Easy mode and build confidence.")
 
 def render_generate_quiz(api_key: str) -> None:
-    """Render quiz generation page and active quiz interaction."""
     render_page_header("Generate Quiz", "Turn your notes into an interactive AI practice session.")
 
     left, right = st.columns([2, 1])
@@ -515,7 +506,6 @@ def render_generate_quiz(api_key: str) -> None:
     render_quiz_feedback()
 
 def render_quiz_history(user_id: int) -> None:
-    """Display previous quizzes and allow retake without API call."""
     render_page_header("Quiz History", "Review attempts and retake quizzes instantly.")
 
     history = fetch_quiz_history(user_id)
@@ -559,7 +549,7 @@ def main() -> None:
     render_top_header_bar(st.session_state.get("username"), api_ready=bool(api_key))
     render_top_hero(
         "AI-Based Student Learning Support System",
-        "Modern AI tutoring workspace with analytics, quiz generation, and revision intelligence.",
+        "AI tutoring workspace with analytics, quiz generation, and revision intelligence.",
     )
 
     render_user_login()
@@ -568,15 +558,8 @@ def main() -> None:
         st.info("Please login above to continue.")
         st.stop()
 
-    pages = ["Dashboard", "Generate Quiz", "Quiz History"]
-    default_index = pages.index(st.session_state.get("page", "Dashboard"))
-    page = st.radio(
-        "Workspace",
-        options=pages,
-        index=default_index,
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    pages = ["Dashboard", "Generate Quiz", "Quiz History", "Study Coach"]
+    page = render_top_nav(pages=pages, current_page=st.session_state.get("page", "Dashboard"))
     st.session_state["page"] = page
 
     if page == "Dashboard":
@@ -585,6 +568,8 @@ def main() -> None:
         render_generate_quiz_page(api_key=api_key, model_name=MODEL_NAME)
     elif page == "Quiz History":
         render_quiz_history_page(st.session_state["user_id"])
+    elif page == "Study Coach":
+        render_study_coach_page(st.session_state["user_id"], api_key=api_key)
 
 if __name__ == "__main__":
     main()

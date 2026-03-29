@@ -1,8 +1,3 @@
-"""SQLite utility helpers for the AI Learning Support System.
-
-This module is intentionally modular so functions can be unit-tested independently.
-"""
-
 from __future__ import annotations
 
 import json
@@ -16,14 +11,13 @@ DB_PATH = BASE_DIR / "learning_support.db"
 
 
 def get_connection() -> sqlite3.Connection:
-    """Create a SQLite connection with row access by column name."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db() -> None:
-    """Initialize required database tables if they do not exist."""
+    """Initialize required database tables if not exist."""
     with closing(get_connection()) as conn:
         with conn:
             conn.execute(
@@ -62,10 +56,23 @@ def init_db() -> None:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    goal TEXT,
+                    hours_per_week INTEGER NOT NULL,
+                    weak_topics_json TEXT NOT NULL,
+                    plan_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+                """
+            )
 
 
 def get_or_create_user(username: str) -> int:
-    """Return user ID for username, creating the user if needed."""
     cleaned = username.strip().lower()
     if not cleaned:
         raise ValueError("Username cannot be empty.")
@@ -87,7 +94,6 @@ def get_or_create_user(username: str) -> int:
 
 
 def insert_quiz(user_id: int, source_text: str, questions: list[dict[str, Any]]) -> int:
-    """Insert a generated quiz and return its ID."""
     with closing(get_connection()) as conn:
         with conn:
             cursor = conn.execute(
@@ -245,3 +251,51 @@ def fetch_quiz_by_id(user_id: int, quiz_id: int) -> dict[str, Any] | None:
         "source_text": row["source_text"],
         "questions": json.loads(row["questions_json"]),
     }
+
+
+def save_study_plan(
+    user_id: int,
+    goal: str,
+    hours_per_week: int,
+    weak_topics: list[str],
+    plan_text: str,
+) -> int:
+    """Persist a generated study plan and return its ID."""
+    with closing(get_connection()) as conn:
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO study_plans (user_id, goal, hours_per_week, weak_topics_json, plan_text)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, goal, hours_per_week, json.dumps(weak_topics), plan_text),
+            )
+            return int(cursor.lastrowid)
+
+
+def fetch_study_plan_history(user_id: int) -> list[dict[str, Any]]:
+    """Fetch study plans for a user (newest first)."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, goal, hours_per_week, weak_topics_json, plan_text, created_at
+            FROM study_plans
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    plans: list[dict[str, Any]] = []
+    for row in rows:
+        plans.append(
+            {
+                "plan_id": int(row["id"]),
+                "goal": row["goal"] or "",
+                "hours_per_week": int(row["hours_per_week"]),
+                "weak_topics": json.loads(row["weak_topics_json"]),
+                "plan_text": row["plan_text"],
+                "created_at": row["created_at"],
+            }
+        )
+    return plans
