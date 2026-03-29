@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from components.modern_ui import render_badges, render_metric_cards, render_page_header
+from components.ui import render_badges, render_metric_cards, render_page_header
 from database import fetch_quiz_history, fetch_score_history, fetch_user_metrics
 
 

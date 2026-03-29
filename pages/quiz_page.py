@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from components.modern_ui import render_page_header
+from components.ui import render_page_header
 from components.session_state import clear_quiz_widget_state
 from database import fetch_user_metrics, save_quiz_attempt
 from services.quiz_engine import generate_quiz_questions, score_answers

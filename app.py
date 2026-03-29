@@ -22,7 +22,7 @@ from pages.dashboard_page import render_dashboard_page
 from pages.history_page import render_quiz_history_page
 from pages.quiz_page import render_generate_quiz_page
 from pages.study_coach_page import render_study_coach_page
-from components.modern_ui import (
+from components.ui import (
     apply_styles,
     render_badges,
     render_metric_cards,

@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from components.modern_ui import render_page_header
+from components.ui import render_page_header
 from database import fetch_quiz_history, fetch_study_plan_history, save_study_plan
 from services.quiz_engine import generate_study_plan
 

@@ -48,7 +48,7 @@ Core capabilities:
 - [pages/quiz_page.py](pages/quiz_page.py) – quiz generation/attempt page
 - [pages/history_page.py](pages/history_page.py) – quiz history + retake page
 - [pages/study_coach_page.py](pages/study_coach_page.py) – personalized study planning page
-- [components/modern_ui.py](components/modern_ui.py) – reusable visual components
+- [components/ui.py](components/ui.py) – reusable visual components
 - [components/session_state.py](components/session_state.py) – session-state helpers
 - [assets/styles.css](assets/styles.css) – custom visual styling
 - [.streamlit/config.toml](.streamlit/config.toml) – Streamlit theme/settings
