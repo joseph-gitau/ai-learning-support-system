@@ -28,6 +28,17 @@ from database import (
     init_db,
     save_quiz_attempt,
 )
+from pages.dashboard_page import render_dashboard_page
+from pages.history_page import render_quiz_history_page
+from pages.quiz_page import render_generate_quiz_page
+from components.modern_ui import (
+    apply_styles,
+    render_badges,
+    render_metric_cards,
+    render_page_header,
+    render_top_header_bar,
+    render_top_hero,
+)
 
 MODEL_NAME = "gemini-2.5-flash"
 MOTIVATIONAL_QUOTES = [
@@ -216,108 +227,118 @@ def clear_quiz_widget_state(question_count: int = 10) -> None:
             del st.session_state[key]
 
 def render_user_login() -> None:
-    """Render lightweight username login in sidebar and persist active user."""
-    st.sidebar.header("User")
+    """Render top login/user card and persist active user."""
+    with st.container(border=True):
+        left, right = st.columns([3, 1])
+        with left:
+            st.markdown("### 👤 Learner Access")
+            st.caption("Use a username to keep personalized history and metrics.")
 
-    if st.session_state["username"]:
-        st.sidebar.success(f"Logged in as: {st.session_state['username']}")
-        if st.sidebar.button("Switch User"):
-            st.session_state["username"] = None
-            st.session_state["user_id"] = None
-            st.session_state["questions"] = None
-            st.session_state["quiz_result"] = None
-            st.session_state["active_quiz_id"] = None
-            clear_quiz_widget_state()
-            st.rerun()
-        return
+        if st.session_state["username"]:
+            with right:
+                st.markdown("&nbsp;", unsafe_allow_html=True)
+                if st.button("Switch User"):
+                    st.session_state["username"] = None
+                    st.session_state["user_id"] = None
+                    st.session_state["questions"] = None
+                    st.session_state["quiz_result"] = None
+                    st.session_state["active_quiz_id"] = None
+                    clear_quiz_widget_state()
+                    st.rerun()
 
-    username = st.sidebar.text_input(
-        "Username",
-        placeholder="e.g., student_001",
-        help="Simple mock login for local use. Data is tracked per username.",
-    ).strip()
+            st.success(f"Logged in as: {st.session_state['username']}")
+            return
 
-    if st.sidebar.button("Login"):
-        if not username:
-            st.sidebar.error("Please enter a username.")
-        else:
-            user_id = get_or_create_user(username)
-            st.session_state["username"] = username
-            st.session_state["user_id"] = user_id
-            st.sidebar.success("Login successful.")
-            st.rerun()
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input(
+                "Username",
+                placeholder="e.g., student_001",
+                help="Simple mock login for local use. Data is tracked per username.",
+            ).strip()
+            submitted = st.form_submit_button("Login", type="primary")
 
-def render_navigation() -> str:
-    """Render sidebar navigation and return selected page."""
-    pages = ["Dashboard", "Generate Quiz", "Quiz History"]
-    selected = st.sidebar.radio(
-        "Navigate",
-        options=pages,
-        index=pages.index(st.session_state.get("page", "Dashboard")),
-    )
-    st.session_state["page"] = selected
-    return selected
+        if submitted:
+            if not username:
+                st.error("Please enter a username.")
+            else:
+                user_id = get_or_create_user(username)
+                st.session_state["username"] = username
+                st.session_state["user_id"] = user_id
+                st.success("Login successful.")
+                st.rerun()
 
 def render_dashboard(user_id: int) -> None:
     """Display user performance metrics and trend chart."""
-    st.subheader("Dashboard")
-    st.caption("Track your learning performance over time.")
+    render_page_header("Dashboard", "Track your learning performance with visual analytics.")
 
     metrics = fetch_user_metrics(user_id)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Quizzes Taken", int(metrics["total_quizzes_taken"]))
-    c2.metric("Average Score", f"{metrics['average_score_percent']:.1f}%")
-    c3.metric("Total Questions Answered", int(metrics["total_questions_answered"]))
+    render_metric_cards(
+        total_quizzes=int(metrics["total_quizzes_taken"]),
+        avg_score=float(metrics["average_score_percent"]),
+        total_questions=int(metrics["total_questions_answered"]),
+    )
 
-    st.markdown("### Score Trend")
+    st.markdown("Average mastery progress")
+    st.progress(min(max(metrics["average_score_percent"] / 100, 0.0), 1.0))
+
+    overview_tab, topic_tab, momentum_tab = st.tabs(["Score Trend", "Topic Mastery", "Momentum"])
+
+    with overview_tab:
+        st.markdown("### Score Trend")
+        history = fetch_score_history(user_id)
+        if not history:
+            st.info("No quiz attempts yet. Generate and submit a quiz to see trend data.")
+            return
+
+        chart_df = pd.DataFrame(history)
+        chart_df["attempt_date"] = pd.to_datetime(chart_df["attempt_date"])
+        chart_df = chart_df.sort_values("attempt_date").set_index("attempt_date")
+        st.line_chart(chart_df[["score_percent"]])
+
+        with st.expander("View trend data table"):
+            st.dataframe(
+                chart_df.reset_index().rename(
+                    columns={
+                        "attempt_date": "Date",
+                        "score": "Score",
+                        "total_questions": "Total Questions",
+                        "score_percent": "Score %",
+                    }
+                ),
+                use_container_width=True,
+            )
+
     history = fetch_score_history(user_id)
     if not history:
         st.info("No quiz attempts yet. Generate and submit a quiz to see trend data.")
         return
 
-    chart_df = pd.DataFrame(history)
-    chart_df["attempt_date"] = pd.to_datetime(chart_df["attempt_date"])
-    chart_df = chart_df.sort_values("attempt_date").set_index("attempt_date")
-    st.line_chart(chart_df[["score_percent"]])
-
-    with st.expander("View trend data table"):
-        st.dataframe(
-            chart_df.reset_index().rename(
-                columns={
-                    "attempt_date": "Date",
-                    "score": "Score",
-                    "total_questions": "Total Questions",
-                    "score_percent": "Score %",
-                }
-            ),
-            use_container_width=True,
-        )
-
-    st.markdown("### Topic Mastery Snapshot")
-    topic_history = fetch_quiz_history(user_id)
-    if topic_history:
-        topic_df = pd.DataFrame(topic_history)
-        topic_df["topic_label"] = topic_df["topic_preview"].fillna("Untitled topic").str.slice(0, 40)
-        topic_mastery = (
-            topic_df.groupby("topic_label", as_index=False)["score_percent"]
-            .mean()
-            .sort_values("score_percent", ascending=False)
-            .head(8)
-            .set_index("topic_label")
-        )
-        st.bar_chart(topic_mastery)
-        with st.expander("View topic mastery table"):
-            st.dataframe(
-                topic_mastery.reset_index().rename(
-                    columns={
-                        "topic_label": "Topic",
-                        "score_percent": "Average Score %",
-                    }
-                ),
-                use_container_width=True,
+    with topic_tab:
+        st.markdown("### Topic Mastery Snapshot")
+        topic_history = fetch_quiz_history(user_id)
+        if topic_history:
+            topic_df = pd.DataFrame(topic_history)
+            topic_df["topic_label"] = topic_df["topic_preview"].fillna("Untitled topic").str.slice(0, 40)
+            topic_mastery = (
+                topic_df.groupby("topic_label", as_index=False)["score_percent"]
+                .mean()
+                .sort_values("score_percent", ascending=False)
+                .head(8)
+                .set_index("topic_label")
             )
-    else:
-        st.info("Topic mastery will appear after your first completed quiz.")
+            st.bar_chart(topic_mastery)
+            with st.expander("View topic mastery table"):
+                st.dataframe(
+                    topic_mastery.reset_index().rename(
+                        columns={
+                            "topic_label": "Topic",
+                            "score_percent": "Average Score %",
+                        }
+                    ),
+                    use_container_width=True,
+                )
+        else:
+            st.info("Topic mastery will appear after your first completed quiz.")
 
     latest = history[-1]["score_percent"]
     best = max(row["score_percent"] for row in history)
@@ -328,27 +349,28 @@ def render_dashboard(user_id: int) -> None:
         else:
             break
 
-    st.markdown("### Learning Momentum")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Latest Score", f"{latest:.1f}%")
-    m2.metric("Best Score", f"{best:.1f}%")
-    m3.metric("Success Streak (≥70%)", streak)
+    with momentum_tab:
+        st.markdown("### Learning Momentum")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Latest Score", f"{latest:.1f}%")
+        m2.metric("Best Score", f"{best:.1f}%")
+        m3.metric("Success Streak (≥70%)", streak)
 
-    badges: list[str] = []
-    if metrics["total_quizzes_taken"] >= 1:
-        badges.append("🚀 Starter")
-    if metrics["total_quizzes_taken"] >= 5:
-        badges.append("📚 Consistent Learner")
-    if best >= 90:
-        badges.append("🏆 High Achiever")
-    if streak >= 3:
-        badges.append("🔥 On a Roll")
+        badges: list[str] = []
+        if metrics["total_quizzes_taken"] >= 1:
+            badges.append("🚀 Starter")
+        if metrics["total_quizzes_taken"] >= 5:
+            badges.append("📚 Consistent Learner")
+        if best >= 90:
+            badges.append("🏆 High Achiever")
+        if streak >= 3:
+            badges.append("🔥 On a Roll")
 
-    st.markdown("### Badges")
-    st.write(" ".join(badges) if badges else "No badges yet — take a quiz to begin.")
+        st.markdown("### Badges")
+        render_badges(badges)
 
-    quote = MOTIVATIONAL_QUOTES[user_id % len(MOTIVATIONAL_QUOTES)]
-    st.info(f"💡 Study Coach: {quote}")
+        quote = MOTIVATIONAL_QUOTES[user_id % len(MOTIVATIONAL_QUOTES)]
+        st.info(f"💡 Study Coach: {quote}")
 
 def render_quiz_form() -> None:
     """Render active quiz form and persist result after submission."""
@@ -434,30 +456,32 @@ def render_quiz_feedback() -> None:
 
 def render_generate_quiz(api_key: str) -> None:
     """Render quiz generation page and active quiz interaction."""
-    st.subheader("Generate Quiz")
-    st.caption("Paste study notes to generate a 3-question quiz with Gemini.")
+    render_page_header("Generate Quiz", "Turn your notes into an interactive AI practice session.")
 
-    notes = st.text_area(
-        "Study notes",
-        value=st.session_state.get("source_text", ""),
-        height=240,
-        placeholder="Paste your lecture notes, summaries, or textbook excerpts here...",
-    )
+    left, right = st.columns([2, 1])
+    with left:
+        notes = st.text_area(
+            "Study notes",
+            value=st.session_state.get("source_text", ""),
+            height=260,
+            placeholder="Paste your lecture notes, summaries, or textbook excerpts here...",
+        )
 
-    with st.expander("Advanced settings"):
-        difficulty = st.selectbox(
-            "Difficulty",
-            options=["Easy", "Mixed", "Hard"],
-            index=1,
-        )
-        style = st.selectbox(
-            "Question style",
-            options=["Conceptual", "Application", "Exam-style"],
-            index=0,
-        )
-        st.write(f"Model: {MODEL_NAME}")
-        st.write("Generation timeout: 30 seconds")
-        st.write("Temperature: 0.2")
+    with right:
+        with st.container(border=True):
+            st.markdown("#### Quiz Settings")
+            difficulty = st.selectbox(
+                "Difficulty",
+                options=["Easy", "Mixed", "Hard"],
+                index=1,
+            )
+            style = st.selectbox(
+                "Question style",
+                options=["Conceptual", "Application", "Exam-style"],
+                index=0,
+            )
+            st.caption(f"Model: {MODEL_NAME}")
+            st.caption("Timeout: 30s • Temperature: 0.2")
 
     if st.button("Generate Quiz", type="primary"):
         if not api_key:
@@ -492,8 +516,7 @@ def render_generate_quiz(api_key: str) -> None:
 
 def render_quiz_history(user_id: int) -> None:
     """Display previous quizzes and allow retake without API call."""
-    st.subheader("Quiz History")
-    st.caption("Review previous attempts and retake any saved quiz.")
+    render_page_header("Quiz History", "Review attempts and retake quizzes instantly.")
 
     history = fetch_quiz_history(user_id)
     if not history:
@@ -528,29 +551,40 @@ def main() -> None:
     init_db()
 
     st.set_page_config(page_title="AI Learning Support System", layout="wide")
-    st.title("📘 AI-Based Student Learning Support System")
-    st.caption("Design • Build • Test lifecycle with personalized learning analytics.")
+    apply_styles("assets/styles.css")
 
     initialize_session_state()
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    render_top_header_bar(st.session_state.get("username"), api_ready=bool(api_key))
+    render_top_hero(
+        "AI-Based Student Learning Support System",
+        "Modern AI tutoring workspace with analytics, quiz generation, and revision intelligence.",
+    )
+
     render_user_login()
 
     if not st.session_state["user_id"]:
-        st.info("Please login from the sidebar to continue.")
+        st.info("Please login above to continue.")
         st.stop()
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    with st.sidebar.expander("System status"):
-        st.write(f"Model: {MODEL_NAME}")
-        st.write("Auth mode: .env only")
-        st.write("Gemini key loaded" if api_key else "Gemini key missing (.env)")
+    pages = ["Dashboard", "Generate Quiz", "Quiz History"]
+    default_index = pages.index(st.session_state.get("page", "Dashboard"))
+    page = st.radio(
+        "Workspace",
+        options=pages,
+        index=default_index,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    st.session_state["page"] = page
 
-    page = render_navigation()
     if page == "Dashboard":
-        render_dashboard(st.session_state["user_id"])
+        render_dashboard_page(st.session_state["user_id"], MOTIVATIONAL_QUOTES)
     elif page == "Generate Quiz":
-        render_generate_quiz(api_key)
+        render_generate_quiz_page(api_key=api_key, model_name=MODEL_NAME)
     elif page == "Quiz History":
-        render_quiz_history(st.session_state["user_id"])
+        render_quiz_history_page(st.session_state["user_id"])
 
 if __name__ == "__main__":
     main()
