@@ -1,8 +1,11 @@
-"""AI-Based Student Learning Support System
+"""AI-Based Student Learning Support System (Phase 2).
 
-Streamlit application that takes student notes, calls Gemini, and generates
-3 multiple-choice questions in JSON format. It then renders an interactive
-quiz, tracks state with Streamlit session state, and scores answers.
+This Streamlit app includes:
+- Sidebar multi-page navigation (Dashboard, Generate Quiz, Quiz History)
+- Lightweight user login (username-based)
+- SQLite persistence for quizzes/results
+- User-level performance dashboard and score trend
+- Quiz history with retake support (no API re-call needed)
 """
 
 from __future__ import annotations
@@ -12,8 +15,19 @@ import os
 from typing import Any
 
 import google.generativeai as genai
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+
+from database import (
+    fetch_quiz_by_id,
+    fetch_quiz_history,
+    fetch_score_history,
+    fetch_user_metrics,
+    get_or_create_user,
+    init_db,
+    save_quiz_attempt,
+)
 
 MODEL_NAME = "gemini-2.5-flash"
 
@@ -57,17 +71,14 @@ def extract_json_array(raw_text: str) -> str:
     """
     text = raw_text.strip()
 
-    # If response is wrapped in markdown code fences, unwrap it safely.
     if text.startswith("```"):
         lines = text.splitlines()
-        # Remove first and last fence if present.
         if lines and lines[0].startswith("```"):
             lines = lines[1:]
         if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
 
-    # Try to isolate the first JSON array if extra text appears.
     start = text.find("[")
     end = text.rfind("]")
     if start != -1 and end != -1 and start < end:
@@ -127,10 +138,8 @@ def generate_quiz_questions(notes: str, api_key: str, model_name: str = MODEL_NA
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
 
-    prompt = build_quiz_prompt(notes)
-
     response = model.generate_content(
-        prompt,
+        build_quiz_prompt(notes),
         generation_config={"temperature": 0.2},
         request_options={"timeout": 30},
     )
@@ -173,9 +182,14 @@ def score_answers(
 
 
 def initialize_session_state() -> None:
-    """Initialize state keys once to prevent key errors."""
+    """Initialize session keys once to prevent key errors."""
     defaults = {
+        "username": None,
+        "user_id": None,
+        "page": "Dashboard",
         "questions": None,
+        "source_text": "",
+        "active_quiz_id": None,
         "quiz_result": None,
     }
     for key, value in defaults.items():
@@ -183,32 +197,177 @@ def initialize_session_state() -> None:
             st.session_state[key] = value
 
 
-def main() -> None:
-    """Run the Streamlit app."""
-    load_dotenv()
+def clear_quiz_widget_state(question_count: int = 10) -> None:
+    """Clear radio widget keys so retakes/new quizzes start cleanly."""
+    for idx in range(1, question_count + 1):
+        key = f"q_{idx}"
+        if key in st.session_state:
+            del st.session_state[key]
 
-    st.set_page_config(page_title="AI Learning Support System", layout="wide")
-    st.title("📘 AI-Based Student Learning Support System")
-    st.caption("Paste your notes, generate a 3-question quiz, and test your understanding.")
 
-    initialize_session_state()
+def render_user_login() -> None:
+    """Render lightweight username login in sidebar and persist active user."""
+    st.sidebar.header("User")
 
-    # Sidebar configuration for API key.
-    st.sidebar.header("Configuration")
-    env_api_key = os.getenv("GEMINI_API_KEY", "")
-    api_key = st.sidebar.text_input(
-        "Gemini API Key",
-        value=env_api_key,
-        type="password",
-        help="Enter your key here or define GEMINI_API_KEY in a .env file.",
+    if st.session_state["username"]:
+        st.sidebar.success(f"Logged in as: {st.session_state['username']}")
+        if st.sidebar.button("Switch User"):
+            st.session_state["username"] = None
+            st.session_state["user_id"] = None
+            st.session_state["questions"] = None
+            st.session_state["quiz_result"] = None
+            st.session_state["active_quiz_id"] = None
+            clear_quiz_widget_state()
+            st.rerun()
+        return
+
+    username = st.sidebar.text_input(
+        "Username",
+        placeholder="e.g., student_001",
+        help="Simple mock login for local use. Data is tracked per username.",
     ).strip()
 
-    st.subheader("1) Paste your study notes")
+    if st.sidebar.button("Login"):
+        if not username:
+            st.sidebar.error("Please enter a username.")
+        else:
+            user_id = get_or_create_user(username)
+            st.session_state["username"] = username
+            st.session_state["user_id"] = user_id
+            st.sidebar.success("Login successful.")
+            st.rerun()
+
+
+def render_navigation() -> str:
+    """Render sidebar navigation and return selected page."""
+    pages = ["Dashboard", "Generate Quiz", "Quiz History"]
+    selected = st.sidebar.radio(
+        "Navigate",
+        options=pages,
+        index=pages.index(st.session_state.get("page", "Dashboard")),
+    )
+    st.session_state["page"] = selected
+    return selected
+
+
+def render_dashboard(user_id: int) -> None:
+    """Display user performance metrics and trend chart."""
+    st.subheader("Dashboard")
+    st.caption("Track your learning performance over time.")
+
+    metrics = fetch_user_metrics(user_id)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Quizzes Taken", int(metrics["total_quizzes_taken"]))
+    c2.metric("Average Score", f"{metrics['average_score_percent']:.1f}%")
+    c3.metric("Total Questions Answered", int(metrics["total_questions_answered"]))
+
+    st.markdown("### Score Trend")
+    history = fetch_score_history(user_id)
+    if not history:
+        st.info("No quiz attempts yet. Generate and submit a quiz to see trend data.")
+        return
+
+    chart_df = pd.DataFrame(history)
+    chart_df["attempt_date"] = pd.to_datetime(chart_df["attempt_date"])
+    chart_df = chart_df.sort_values("attempt_date").set_index("attempt_date")
+    st.line_chart(chart_df[["score_percent"]])
+
+    with st.expander("View trend data table"):
+        st.dataframe(
+            chart_df.reset_index().rename(
+                columns={
+                    "attempt_date": "Date",
+                    "score": "Score",
+                    "total_questions": "Total Questions",
+                    "score_percent": "Score %",
+                }
+            ),
+            use_container_width=True,
+        )
+
+
+def render_quiz_form() -> None:
+    """Render active quiz form and persist result after submission."""
+    questions = st.session_state.get("questions")
+    if not questions:
+        st.info("No active quiz yet. Generate one first or retake from history.")
+        return
+
+    st.subheader("Answer the quiz")
+    with st.form("quiz_form"):
+        selected_answers: list[str | None] = []
+
+        for idx, item in enumerate(questions, start=1):
+            st.markdown(f"**Q{idx}. {item['question']}**")
+            selected = st.radio(
+                f"Select your answer for Q{idx}",
+                options=item["options"],
+                index=None,
+                key=f"q_{idx}",
+            )
+            selected_answers.append(selected)
+
+        submitted = st.form_submit_button("Submit Answers")
+
+    if submitted:
+        if any(ans is None for ans in selected_answers):
+            st.error("Please answer all questions before submitting.")
+            return
+
+        result = score_answers(questions, selected_answers)
+        st.session_state["quiz_result"] = result
+
+        save_quiz_attempt(
+            user_id=st.session_state["user_id"],
+            source_text=st.session_state.get("source_text", ""),
+            questions=questions,
+            score=result["score"],
+            total_questions=result["total"],
+            selected_answers=selected_answers,
+        )
+
+
+def render_quiz_feedback() -> None:
+    """Show score summary and per-question explanations."""
+    quiz_result = st.session_state.get("quiz_result")
+    if not quiz_result:
+        return
+
+    st.subheader("Feedback & Scoring")
+    st.info(f"You scored {quiz_result['score']}/{quiz_result['total']}!")
+
+    for i, item in enumerate(quiz_result["results"], start=1):
+        if item["is_correct"]:
+            st.success(
+                f"Q{i}: Correct ✅\n\n"
+                f"Your answer: {item['chosen']}\n\n"
+                f"Explanation: {item['explanation']}"
+            )
+        else:
+            st.warning(
+                f"Q{i}: Incorrect ⚠️\n\n"
+                f"Your answer: {item['chosen']}\n\n"
+                f"Correct answer: {item['correct']}\n\n"
+                f"Explanation: {item['explanation']}"
+            )
+
+
+def render_generate_quiz(api_key: str) -> None:
+    """Render quiz generation page and active quiz interaction."""
+    st.subheader("Generate Quiz")
+    st.caption("Paste study notes to generate a 3-question quiz with Gemini.")
+
     notes = st.text_area(
         "Study notes",
-        height=260,
+        value=st.session_state.get("source_text", ""),
+        height=240,
         placeholder="Paste your lecture notes, summaries, or textbook excerpts here...",
     )
+
+    with st.expander("Advanced settings"):
+        st.write(f"Model: {MODEL_NAME}")
+        st.write("Generation timeout: 30 seconds")
+        st.write("Temperature: 0.2")
 
     if st.button("Generate Quiz", type="primary"):
         if not api_key:
@@ -218,61 +377,90 @@ def main() -> None:
         else:
             with st.spinner("Generating quiz from your notes..."):
                 try:
-                    st.session_state["questions"] = generate_quiz_questions(notes, api_key)
+                    questions = generate_quiz_questions(notes, api_key)
+                    st.session_state["questions"] = questions
+                    st.session_state["source_text"] = notes
+                    st.session_state["active_quiz_id"] = None
                     st.session_state["quiz_result"] = None
+                    clear_quiz_widget_state(question_count=len(questions))
                     st.success("Quiz generated successfully. Answer the questions below.")
                 except ValueError as exc:
                     st.error(f"Could not generate a valid quiz: {exc}")
-                except Exception as exc:  # Broad catch for network/API issues.
+                except Exception as exc:
                     st.error(
                         "Something went wrong while contacting Gemini. "
                         f"Please try again. Details: {exc}"
                     )
 
-    questions = st.session_state.get("questions")
-    if questions:
-        st.subheader("2) Answer the quiz")
+    render_quiz_form()
+    render_quiz_feedback()
 
-        with st.form("quiz_form"):
-            selected_answers: list[str | None] = []
 
-            for idx, item in enumerate(questions, start=1):
-                st.markdown(f"**Q{idx}. {item['question']}**")
-                selected = st.radio(
-                    f"Select your answer for Q{idx}",
-                    options=item["options"],
-                    index=None,
-                    key=f"q_{idx}",
-                )
-                selected_answers.append(selected)
+def render_quiz_history(user_id: int) -> None:
+    """Display previous quizzes and allow retake without API call."""
+    st.subheader("Quiz History")
+    st.caption("Review previous attempts and retake any saved quiz.")
 
-            submitted = st.form_submit_button("Submit Answers")
+    history = fetch_quiz_history(user_id)
+    if not history:
+        st.info("No quiz history yet.")
+        return
 
-        if submitted:
-            if any(ans is None for ans in selected_answers):
-                st.error("Please answer all questions before submitting.")
-            else:
-                st.session_state["quiz_result"] = score_answers(questions, selected_answers)
+    for item in history:
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([4, 2, 1])
+            c1.markdown(f"**Topic preview:** {item['topic_preview']}")
+            c1.caption(f"Created: {item['created_at']}")
+            c2.metric("Last Score", f"{item['score']}/{item['total_questions']}")
+            c2.caption(f"{item['score_percent']:.1f}%")
 
-    quiz_result = st.session_state.get("quiz_result")
-    if quiz_result:
-        st.subheader("3) Feedback & scoring")
-        st.info(f"You scored {quiz_result['score']}/{quiz_result['total']}!")
+            if c3.button("Retake", key=f"retake_{item['quiz_id']}"):
+                quiz = fetch_quiz_by_id(user_id=user_id, quiz_id=item["quiz_id"])
+                if not quiz:
+                    st.error("Could not load this quiz from the database.")
+                else:
+                    st.session_state["questions"] = quiz["questions"]
+                    st.session_state["source_text"] = quiz["source_text"]
+                    st.session_state["active_quiz_id"] = quiz["quiz_id"]
+                    st.session_state["quiz_result"] = None
+                    clear_quiz_widget_state(question_count=len(quiz["questions"]))
+                    st.session_state["page"] = "Generate Quiz"
+                    st.success("Quiz loaded. Redirecting to Generate Quiz...")
+                    st.rerun()
 
-        for i, item in enumerate(quiz_result["results"], start=1):
-            if item["is_correct"]:
-                st.success(
-                    f"Q{i}: Correct ✅\n\n"
-                    f"Your answer: {item['chosen']}\n\n"
-                    f"Explanation: {item['explanation']}"
-                )
-            else:
-                st.warning(
-                    f"Q{i}: Incorrect ⚠️\n\n"
-                    f"Your answer: {item['chosen']}\n\n"
-                    f"Correct answer: {item['correct']}\n\n"
-                    f"Explanation: {item['explanation']}"
-                )
+
+def main() -> None:
+    """Run the Streamlit app."""
+    load_dotenv()
+    init_db()
+
+    st.set_page_config(page_title="AI Learning Support System", layout="wide")
+    st.title("📘 AI-Based Student Learning Support System")
+    st.caption("Design • Build • Test lifecycle with personalized learning analytics.")
+
+    initialize_session_state()
+    render_user_login()
+
+    if not st.session_state["user_id"]:
+        st.info("Please login from the sidebar to continue.")
+        st.stop()
+
+    st.sidebar.header("Configuration")
+    env_api_key = os.getenv("GEMINI_API_KEY", "")
+    api_key = st.sidebar.text_input(
+        "Gemini API Key",
+        value=env_api_key,
+        type="password",
+        help="Enter your key here or define GEMINI_API_KEY in a .env file.",
+    ).strip()
+
+    page = render_navigation()
+    if page == "Dashboard":
+        render_dashboard(st.session_state["user_id"])
+    elif page == "Generate Quiz":
+        render_generate_quiz(api_key)
+    elif page == "Quiz History":
+        render_quiz_history(st.session_state["user_id"])
 
 
 if __name__ == "__main__":
